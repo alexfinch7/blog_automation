@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HBT Blog Generator</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Houston Broadway Theatre Blog Generator</h1>
+
+    <label for="prompt">Blog topic / prompt</label>
+    <input id="prompt" type="text" placeholder="e.g. Best musicals to see in Houston this fall" />
+
+    <button id="generateBtn">Generate Draft</button>
+
+    <div id="progress" class="progress hidden">
+      <div id="bar"></div>
+      <span id="status">Starting…</span>
+    </div>
+
+    <div id="result" class="hidden">
+      <h2>Draft created!</h2>
+      <p><a id="previewLink" target="_blank" rel="noopener">Preview in Webflow ↗</a></p>
+      <button id="publishBtn">Publish</button>
+      <span id="publishStatus"></span>
+    </div>
+
+    <div id="contextSection" class="hidden">
+      <h3>Context:</h3>
+      <div class="context-box"></div>
+    </div>
+
+    <h3>Logs</h3>
+    <pre id="log" class="log"></pre>
+  </div>
+
+  <script>
+    const generateBtn = document.getElementById('generateBtn');
+    const promptInput = document.getElementById('prompt');
+    const progress = document.getElementById('progress');
+    const bar = document.getElementById('bar');
+    const status = document.getElementById('status');
+    const result = document.getElementById('result');
+    const previewLink = document.getElementById('previewLink');
+    const publishBtn = document.getElementById('publishBtn');
+    const publishStatus = document.getElementById('publishStatus');
+    const logEl = document.getElementById('log');
+
+    let itemId;
+
+    function updateProgress(step, pct) {
+      status.textContent = step;
+      bar.style.width = pct + '%';
+    }
+
+    function log(msg){logEl.textContent+=msg+'\n';}
+
+    generateBtn.addEventListener('click', async () => {
+      const prompt = promptInput.value.trim();
+      if (!prompt) return alert('Enter a prompt');
+
+      generateBtn.disabled = true;
+      result.classList.add('hidden');
+      progress.classList.remove('hidden');
+      updateProgress('Generating…', 10);
+
+      try {
+        const res = await fetch('/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt })
+        });
+        if (!res.ok){
+          const errText = await res.text();
+          log(errText);
+          throw new Error(errText);
+        }
+        updateProgress('Finishing up…', 80);
+        const data = await res.json();
+        itemId = data.itemId;
+        if(data.context){
+          const ctxBox=document.querySelector('.context-box');
+          ctxBox.innerHTML='';
+          data.context.forEach(c=>{
+            const div=document.createElement('div');
+            div.className='context-item';
+            div.innerHTML=`<strong><a href='${c.url}' target='_blank'>${c.title||'Link'}</a></strong><br><span>${c.snippet}</span>`;
+            ctxBox.appendChild(div);
+          });
+          document.getElementById('contextSection').classList.remove('hidden');
+        }
+        if(data.log){log(data.log);}
+        previewLink.href = data.previewUrl;
+        progress.classList.add('hidden');
+        result.classList.remove('hidden');
+      } catch (err) {
+        alert('Error: ' + err);
+        log(err);
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+
+    publishBtn.addEventListener('click', async () => {
+      if (!itemId) return;
+      publishBtn.disabled = true;
+      publishStatus.textContent = 'Publishing…';
+      try {
+        const res = await fetch('/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemId })
+        });
+        if (!res.ok){
+          const errText=await res.text(); log(errText); throw new Error(errText);}          
+        const data=await res.json();
+        if(data.log){log(data.log);}
+        publishStatus.innerHTML = `✅ Published! <a href="${data.liveUrl}" target="_blank">View live page ↗</a>`;
+      } catch (err) {
+        publishStatus.textContent = '❌ Error';
+        log(err);
+      } finally {
+        publishBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html> 
