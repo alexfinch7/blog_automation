@@ -1,5 +1,5 @@
 flask==2.3.3
-vercel-wsgi>=0.9.0
+awsgi
 python-dotenv
 openai
 exa_py
