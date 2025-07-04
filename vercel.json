@@ -5,6 +5,7 @@
   ],
   "routes": [
     { "src": "/static/(.*)", "dest": "/static/$1" },
-    { "src": "/(.*)", "dest": "/" }
+
+    { "src": "/(.*)",       "dest": "/api/index.py" }
   ]
 }
