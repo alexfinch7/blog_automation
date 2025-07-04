@@ -2,7 +2,8 @@ from flask import Flask, render_template, request, jsonify
 import threading
 import os
 import json
-from main import generate_blog_content, create_blog_post, generate_and_upload_image, slugify, generate_meta_tag, _publish_items, search_the_web
+from main import generate_blog_content, create_blog_post, generate_and_upload_image, slugify, generate_meta_tag, _publish_items, search_the_web, search_unsplash, _upload_asset
+import requests
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
@@ -49,73 +50,46 @@ def generate():
 
     title = blog["title"].strip()
     slug = slugify(title)
-    meta_description = generate_meta_tag(title, blog["body"])
 
-    # Get unsplash images + chosen cover
-    cover_obj = generate_and_upload_image(title)
-    backend_log.append("✅ Cover image uploaded")
+    # ---- Unsplash options (top 5) ----
+    images_raw = []
+    try:
+        images_raw = search_unsplash(title)[:5]
+        backend_log.append("✅ Unsplash options fetched")
+    except Exception as e:
+        backend_log.append("Unsplash search failed: " + str(e))
 
-    # ─── BUILD CONTEXT ──────────────────────────────────────────────────────
+    image_options = []
+    for r in images_raw:
+        image_options.append({
+            "id": r.get("id"),
+            "thumb": r.get("urls", {}).get("thumb"),
+            "regular": r.get("urls", {}).get("regular"),
+            "alt": r.get("alt_description") or title
+        })
+
+    # ---- Build context from search_results (same logic as before, without fallback) ----
     context = []
     results_list = []
-
-    if raw_results and isinstance(raw_results, dict):
-        # Primary: nested under data -> results
-        data_block = raw_results.get("data", {})
+    if search_results and isinstance(search_results, dict):
+        data_block = search_results.get("data", {})
         if isinstance(data_block, dict):
             results_list = data_block.get("results", [])
-        # Secondary: top-level "results" key
-        if not results_list and isinstance(raw_results.get("results"), list):
-            results_list = raw_results["results"]
-
-    # Map first 10 hits
+        if not results_list and isinstance(search_results.get("results"), list):
+            results_list = search_results["results"]
     for hit in results_list[:10]:
         context.append({
-            "title":   hit.get("title") or hit.get("headline"),
-            "url":     hit.get("url"),
+            "title": hit.get("title") or hit.get("headline"),
+            "url": hit.get("url"),
             "snippet": (hit.get("text") or hit.get("snippet") or "")[:200] + "…"
         })
 
-    # Fallback: perform fresh search if context still empty
-    if not context:
-        try:
-            fallback = search_the_web(prompt)
-            results_list = []
-            if fallback and isinstance(fallback, dict):
-                data_block = fallback.get("data", {}) if isinstance(fallback.get("data"), dict) else {}
-                results_list = data_block.get("results", [])
-                if not results_list and isinstance(fallback.get("results"), list):
-                    results_list = fallback["results"]
-            for hit in results_list[:10]:
-                context.append({
-                    "title":   hit.get("title") or hit.get("headline"),
-                    "url":     hit.get("url"),
-                    "snippet": (hit.get("text") or hit.get("snippet") or "")[:200] + "…"
-                })
-            if context:
-                backend_log.append("✅ Fetched context via fallback search")
-        except Exception as e:
-            backend_log.append("Context fallback failed: " + str(e))
-
-    item = create_blog_post(
-        name=title,
-        slug=slug,
-        post_body=blog["body"],
-        post_summary=blog["summary"],
-        main_image=cover_obj,
-        featured=False,
-        meta_description=meta_description,
-        publish=False,
-    )
-    backend_log.append("✅ Draft item created")
-
-    preview_url = build_preview_url(item["id"])
     return jsonify({
         "title": title,
-        "itemId": item["id"],
         "slug": slug,
-        "previewUrl": preview_url,
+        "blog": blog,
         "context": context,
+        "images": image_options,
         "log": "\n".join(backend_log)
     })
 
@@ -132,6 +106,88 @@ def publish():
         slug = data.get("slug", "")
         return jsonify({"status": "published", "liveUrl": f"{SITE_LIVE_BASE}/blog/{slug}", "log": "Published successfully"})
     return jsonify({"error": "Publish API error", "details": resp.text}), 500
+
+
+@app.route("/create", methods=["POST"])
+def create_item():
+    data = request.get_json()
+    title = data.get("title", "").strip()
+    slug = data.get("slug", "").strip() or slugify(title)
+    summary = data.get("summary", "")
+    body_html = data.get("body", "")
+    image_url = data.get("imageUrl", "")
+    image_alt = data.get("imageAlt", title)
+
+    if not (title and body_html and image_url):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    backend_log = []
+
+    # Upload selected image to Webflow assets
+    try:
+        img_bytes = requests.get(image_url, timeout=20).content
+        filename = f"hbt-unsplash-selected.jpg"
+        file_id, hosted_url = _upload_asset(img_bytes, filename)
+        cover_obj = {"url": hosted_url, "alt": image_alt}
+        backend_log.append("✅ Cover image uploaded")
+    except Exception as e:
+        return jsonify({"error": str(e), "log": "Image upload failed"}), 500
+
+    # Meta description
+    try:
+        meta_description = generate_meta_tag(title, body_html)
+    except Exception:
+        meta_description = ""
+
+    # Create Webflow draft
+    try:
+        item = create_blog_post(
+            name=title,
+            slug=slug,
+            post_body=body_html,
+            post_summary=summary,
+            main_image=cover_obj,
+            featured=False,
+            meta_description=meta_description,
+            publish=False,
+        )
+        backend_log.append("✅ Draft item created")
+    except Exception as e:
+        return jsonify({"error": str(e), "log": "create_blog_post failed"}), 500
+
+    preview_url = build_preview_url(item["id"])
+    return jsonify({
+        "previewUrl": preview_url,
+        "itemId": item["id"],
+        "log": "\n".join(backend_log)
+    })
+
+
+@app.route("/edit_ai", methods=["POST"])
+def edit_ai():
+    data = request.get_json()
+    body_html = data.get("body", "")
+    instruction = data.get("instruction", "").strip()
+    if not body_html or not instruction:
+        return jsonify({"error": "body and instruction required"}), 400
+
+    prompt_system = (
+        "You are an expert copy editor for web blog posts. Given the HTML of a section and an instruction, "
+        "produce the revised HTML only. Do not wrap in markdown."
+    )
+
+    messages = [
+        {"role": "system", "content": prompt_system},
+        {"role": "user", "content": f"HTML:\n{body_html}\n\nInstruction: {instruction}"},
+    ]
+
+    try:
+        from main import client  # reuse existing OpenAI client
+        resp = client.chat.completions.create(model="gpt-4o-mini", messages=messages, temperature=0.7)
+        new_html = resp.choices[0].message.content.strip()
+        return jsonify({"body": new_html, "log": "AI edit applied"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

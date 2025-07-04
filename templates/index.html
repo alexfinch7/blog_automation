@@ -15,6 +15,27 @@
 
     <button id="generateBtn">Generate Draft</button>
 
+    <div id="editor" class="hidden">
+      <h3>Blog Content</h3>
+      <label>Title</label>
+      <input id="titleInput" type="text" />
+      <label>Summary</label>
+      <textarea id="summaryInput" rows="3"></textarea>
+      <label>Body (HTML)</label>
+      <textarea id="bodyInput" rows="10"></textarea>
+
+      <h4>Preview</h4>
+      <div id="bodyPreview" class="body-preview"></div>
+
+      <h4>Edit with AI</h4>
+      <textarea id="aiEditInput" rows="2" placeholder="e.g. make tone more conversational"></textarea>
+      <button id="aiEditBtn">Apply AI Edit</button>
+
+      <h3>Select Cover Image</h3>
+      <div id="imageOptions" class="image-options"></div>
+      <button id="createBtn">Create Webflow Draft</button>
+    </div>
+
     <div id="progress" class="progress hidden">
       <div id="bar"></div>
       <span id="status">Starting…</span>
@@ -47,6 +68,15 @@
     const publishBtn = document.getElementById('publishBtn');
     const publishStatus = document.getElementById('publishStatus');
     const logEl = document.getElementById('log');
+    const editor = document.getElementById('editor');
+    const titleInput = document.getElementById('titleInput');
+    const summaryInput = document.getElementById('summaryInput');
+    const bodyInput = document.getElementById('bodyInput');
+    const imageOptionsDiv = document.getElementById('imageOptions');
+    const createBtn = document.getElementById('createBtn');
+    const bodyPreview = document.getElementById('bodyPreview');
+    const aiEditInput = document.getElementById('aiEditInput');
+    const aiEditBtn = document.getElementById('aiEditBtn');
 
     let itemId;
 
@@ -91,10 +121,22 @@
           });
           document.getElementById('contextSection').classList.remove('hidden');
         }
+        titleInput.value = data.blog.title;
+        summaryInput.value = data.blog.summary;
+        bodyInput.value = data.blog.body;
+        bodyPreview.innerHTML = data.blog.body;
+        bodyInput.addEventListener('input', ()=>{bodyPreview.innerHTML = bodyInput.value;});
+        imageOptionsDiv.innerHTML='';
+        window.lastImages = data.images;
+        data.images.forEach((img, idx)=>{
+          const wrapper=document.createElement('div');
+          wrapper.className='image-option';
+          wrapper.innerHTML=`<label><input type='radio' name='cover' value='${idx}' ${idx===0?'checked':''}> <img src='${img.thumb}' alt='${img.alt}'></label>`;
+          imageOptionsDiv.appendChild(wrapper);
+        });
+        editor.classList.remove('hidden');
         if(data.log){log(data.log);}
-        previewLink.href = data.previewUrl;
         progress.classList.add('hidden');
-        result.classList.remove('hidden');
       } catch (err) {
         alert('Error: ' + err);
         log(err);
@@ -125,6 +167,58 @@
         publishBtn.disabled = false;
       }
     });
+
+    createBtn.addEventListener('click', async ()=>{
+      const selectedIdx = document.querySelector('input[name="cover"]:checked')?.value;
+      if(selectedIdx===undefined){alert('Select an image'); return;}
+      const imgData = window.lastImages[selectedIdx];
+
+      createBtn.disabled=true;
+      updateProgress('Creating draft…', 50);
+      progress.classList.remove('hidden');
+
+      try{
+        const res = await fetch('/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          title:titleInput.value.trim(),
+          slug:slugify(titleInput.value.trim()),
+          summary:summaryInput.value,
+          body:bodyInput.value,
+          imageUrl:imgData.regular,
+          imageAlt:imgData.alt
+        })});
+        const data = await res.json();
+        if(!res.ok){throw new Error(JSON.stringify(data));}
+        previewLink.href = data.previewUrl;
+        itemId = data.itemId;
+        result.classList.remove('hidden');
+        if(data.log){log(data.log);}  
+      }catch(err){alert(err);log(err);}finally{
+        progress.classList.add('hidden');
+        createBtn.disabled=false;
+      }
+    });
+
+    aiEditBtn.addEventListener('click', async ()=>{
+      const instruction = aiEditInput.value.trim();
+      if(!instruction){alert('Enter an instruction'); return;}
+      aiEditBtn.disabled = true;
+      updateProgress('AI editing…', 30);
+      progress.classList.remove('hidden');
+      try{
+        const res = await fetch('/edit_ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:bodyInput.value,instruction})});
+        const data = await res.json();
+        if(!res.ok){throw new Error(JSON.stringify(data));}
+        bodyInput.value = data.body;
+        bodyPreview.innerHTML = data.body;
+        aiEditInput.value = '';
+        if(data.log){log(data.log);}  
+      }catch(err){alert(err);log(err);}finally{
+        progress.classList.add('hidden');
+        aiEditBtn.disabled=false;
+      }
+    });
+
+    function slugify(str){return str.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').substring(0,256);}
   </script>
 </body>
 </html> 

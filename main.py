@@ -14,12 +14,12 @@ load_dotenv()
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
 
 # It's best to store your API_TOKEN in an environment variable.
-API_TOKEN       = os.getenv("API_TOKEN")
-SITE_ID         = os.getenv("SITE_ID")
-COLLECTION_ID   = os.getenv("COLLECTION_ID")
-BASE_URL        = os.getenv("BASE_URL", "https://api.webflow.com/v2")
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
-EXA_API_KEY     = os.getenv("EXA_API_KEY")
+API_TOKEN      = os.getenv("API_TOKEN")
+SITE_ID       = os.getenv("SITE_ID")
+COLLECTION_ID = os.getenv("COLLECTION_ID")
+BASE_URL      = os.getenv("BASE_URL")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+EXA_API_KEY   = os.getenv("EXA_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
 # NOTE: `Accept-Version` is optional for v2, but explicitly setting it can help avoid
