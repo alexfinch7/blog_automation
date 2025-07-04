@@ -1,11 +1,11 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import threading
 import os
 import json
 from main import generate_blog_content, create_blog_post, generate_and_upload_image, slugify, generate_meta_tag, _publish_items, search_the_web, search_unsplash, _upload_asset
 import requests
 
-app = Flask(__name__, static_folder="static", template_folder="templates")
+app = Flask(__name__, static_folder="static", static_url_path="/static", template_folder="templates")
 
 # Webflow PAGE_ID to build preview link (update with your page template ID)
 PAGE_ID = os.getenv("WEBFLOW_PAGE_ID", "6840abed80ea2156f6db707e")
@@ -16,6 +16,12 @@ SITE_LIVE_BASE = os.getenv("LIVE_BASE", "https://hbt-houston-broadway.webflow.io
 
 def build_preview_url(item_id: str) -> str:
     return SITE_PREVIEW_BASE.format(page_id=PAGE_ID, item_id=item_id)
+
+
+# Explicit static file route for Vercel deployment
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    return send_from_directory('static', filename)
 
 
 @app.route("/")

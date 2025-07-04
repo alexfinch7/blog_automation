@@ -4,7 +4,24 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HBT Blog Generator</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <style>
+    /* Fallback CSS in case external stylesheet doesn't load */
+    body {font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #fafafa;}
+    .container {max-width: 700px; margin: 2rem auto; background:#fff; padding:2rem 2.5rem; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.08);}
+    .hidden {display:none;}
+    label {display:block; margin-bottom:0.5rem; font-weight:600;}
+    input, textarea {width:100%; padding:0.6rem; font-size:1rem; margin-bottom:1rem; border:1px solid #ccc; border-radius:4px; box-sizing: border-box;}
+    button {background:#6f42c1; color:#fff; border:none; padding:0.6rem 1.2rem; font-size:1rem; border-radius:4px; cursor:pointer; margin-right: 0.5rem; margin-bottom: 0.5rem;}
+    button:disabled {opacity:0.6; cursor:not-allowed;}
+    .progress {margin-top:1rem; position:relative; height:8px; background:#eee; border-radius:4px;}
+    .progress #bar {position:absolute; left:0; top:0; height:100%; width:0; background:#6f42c1; border-radius:4px; transition:width 0.3s;}
+    .log{background:#272822; color:#f8f8f2; padding:1rem; max-height:150px; overflow:auto; border-radius:4px; font-size:0.8rem;}
+    .image-options{display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;}
+    .image-option img{width:120px;height:80px;object-fit:cover;border-radius:4px;border:2px solid transparent;}
+    .image-option input[type="radio"]:checked + img{border-color:#6f42c1;}
+    .image-option input[type="radio"]{display:none;}
+  </style>
 </head>
 <body>
   <div class="container">
