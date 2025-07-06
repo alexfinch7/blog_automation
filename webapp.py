@@ -11,7 +11,7 @@ app = Flask(__name__, static_folder="static", static_url_path="/static", templat
 PAGE_ID = os.getenv("WEBFLOW_PAGE_ID", "6840abed80ea2156f6db707e")
 SITE_PREVIEW_BASE = "https://hbt-houston-broadway.design.webflow.com/?locale=en&mode=edit&workflow=canvas&pageId={page_id}&itemId={item_id}"
 # Base URL of the live site (no trailing slash), used to build the final page link after publish
-SITE_LIVE_BASE = os.getenv("LIVE_BASE", "https://hbt-houston-broadway.webflow.io")
+SITE_LIVE_BASE = os.getenv("LIVE_BASE", "https://www.houstonbroadwaytheatre.org")
 
 
 def build_preview_url(item_id: str) -> str:

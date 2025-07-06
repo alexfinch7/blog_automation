@@ -96,6 +96,7 @@
     const aiEditBtn = document.getElementById('aiEditBtn');
 
     let itemId;
+    let currentSlug;
 
     function updateProgress(step, pct) {
       status.textContent = step;
@@ -170,7 +171,7 @@
         const res = await fetch('/publish', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ itemId })
+          body: JSON.stringify({ itemId, slug: currentSlug })
         });
         if (!res.ok){
           const errText=await res.text(); log(errText); throw new Error(errText);}          
@@ -195,9 +196,10 @@
       progress.classList.remove('hidden');
 
       try{
+        const slug = slugify(titleInput.value.trim());
         const res = await fetch('/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
           title:titleInput.value.trim(),
-          slug:slugify(titleInput.value.trim()),
+          slug:slug,
           summary:summaryInput.value,
           body:bodyInput.value,
           imageUrl:imgData.regular,
@@ -207,6 +209,7 @@
         if(!res.ok){throw new Error(JSON.stringify(data));}
         previewLink.href = data.previewUrl;
         itemId = data.itemId;
+        currentSlug = slug;
         result.classList.remove('hidden');
         if(data.log){log(data.log);}  
       }catch(err){alert(err);log(err);}finally{
