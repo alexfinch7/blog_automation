@@ -196,5 +196,27 @@ def edit_ai():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/search_images", methods=["POST"])
+def search_images():
+    data = request.get_json()
+    query = data.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Search query required"}), 400
+
+    try:
+        images_raw = search_unsplash(query)[:8]  # Get up to 8 results
+        image_options = []
+        for r in images_raw:
+            image_options.append({
+                "id": r.get("id"),
+                "thumb": r.get("urls", {}).get("thumb"),
+                "regular": r.get("urls", {}).get("regular"),
+                "alt": r.get("alt_description") or query
+            })
+        return jsonify({"images": image_options, "log": f"Found {len(image_options)} images for '{query}'"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=int(os.getenv("PORT", 5000))) 

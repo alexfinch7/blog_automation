@@ -21,6 +21,10 @@
     .image-option img{width:120px;height:80px;object-fit:cover;border-radius:4px;border:2px solid transparent;}
     .image-option input[type="radio"]:checked + img{border-color:#6f42c1;}
     .image-option input[type="radio"]{display:none;}
+    h4 {margin-top:1.5rem; margin-bottom:0.5rem; color:#666; font-size:1rem;}
+    #imageSearchInput {margin-bottom:0.5rem;}
+    #imageSearchBtn {margin-bottom:1rem;}
+    #customImageOptions {margin-top:0.5rem;}
   </style>
 </head>
 <body>
@@ -50,6 +54,12 @@
 
       <h3>Select Cover Image</h3>
       <div id="imageOptions" class="image-options"></div>
+      
+      <h4>Search for Different Images</h4>
+      <input id="imageSearchInput" type="text" placeholder="e.g. theater, musical, Broadway, stage" />
+      <button id="imageSearchBtn">Search Unsplash</button>
+      <div id="customImageOptions" class="image-options"></div>
+      
       <button id="createBtn">Create Webflow Draft</button>
     </div>
 
@@ -94,6 +104,9 @@
     const bodyPreview = document.getElementById('bodyPreview');
     const aiEditInput = document.getElementById('aiEditInput');
     const aiEditBtn = document.getElementById('aiEditBtn');
+    const imageSearchInput = document.getElementById('imageSearchInput');
+    const imageSearchBtn = document.getElementById('imageSearchBtn');
+    const customImageOptions = document.getElementById('customImageOptions');
 
     let itemId;
     let currentSlug;
@@ -187,9 +200,27 @@
     });
 
     createBtn.addEventListener('click', async ()=>{
-      const selectedIdx = document.querySelector('input[name="cover"]:checked')?.value;
-      if(selectedIdx===undefined){alert('Select an image'); return;}
-      const imgData = window.lastImages[selectedIdx];
+      const selectedValue = document.querySelector('input[name="cover"]:checked')?.value;
+      if(selectedValue===undefined){alert('Select an image'); return;}
+      
+      let imgData;
+      if(selectedValue.startsWith('custom-')){
+        // Custom search result
+        const customIdx = parseInt(selectedValue.replace('custom-', ''));
+        if(!window.customImages || !window.customImages[customIdx]){
+          alert('Custom image not found. Please search again.'); 
+          return;
+        }
+        imgData = window.customImages[customIdx];
+      } else {
+        // Original automatic suggestion
+        const originalIdx = parseInt(selectedValue);
+        if(!window.lastImages || !window.lastImages[originalIdx]){
+          alert('Original image not found. Please generate content again.'); 
+          return;
+        }
+        imgData = window.lastImages[originalIdx];
+      }
 
       createBtn.disabled=true;
       updateProgress('Creating draft…', 50);
@@ -235,6 +266,47 @@
       }catch(err){alert(err);log(err);}finally{
         progress.classList.add('hidden');
         aiEditBtn.disabled=false;
+      }
+    });
+
+    imageSearchBtn.addEventListener('click', async ()=>{
+      const query = imageSearchInput.value.trim();
+      if(!query){alert('Enter a search term'); return;}
+      imageSearchBtn.disabled = true;
+      updateProgress('Searching images…', 40);
+      progress.classList.remove('hidden');
+      try{
+        const res = await fetch('/search_images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query})});
+        const data = await res.json();
+        if(!res.ok){throw new Error(JSON.stringify(data));}
+        
+        // Clear previous custom search results
+        customImageOptions.innerHTML = '';
+        
+        // Add new custom images to the same radio group
+        data.images.forEach((img, idx)=>{
+          const wrapper = document.createElement('div');
+          wrapper.className = 'image-option';
+          const radioValue = `custom-${idx}`;
+          wrapper.innerHTML = `<label><input type='radio' name='cover' value='${radioValue}'> <img src='${img.thumb}' alt='${img.alt}'></label>`;
+          customImageOptions.appendChild(wrapper);
+        });
+        
+        // Store custom images for later use
+        window.customImages = data.images;
+        
+        if(data.log){log(data.log);}  
+      }catch(err){alert(err);log(err);}finally{
+        progress.classList.add('hidden');
+        imageSearchBtn.disabled=false;
+      }
+    });
+
+    // Allow Enter key to trigger image search
+    imageSearchInput.addEventListener('keypress', (e)=>{
+      if(e.key === 'Enter'){
+        e.preventDefault();
+        imageSearchBtn.click();
       }
     });
 
