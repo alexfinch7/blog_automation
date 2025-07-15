@@ -7,6 +7,7 @@ import hashlib
 from datetime import datetime
 from exa_py import Exa
 from dotenv import load_dotenv
+import tiktoken
 
 # Load variables from a local .env file (ignored by git) so os.getenv picks them up
 load_dotenv()
@@ -135,6 +136,27 @@ def _debug_request_error(response: requests.Response, payload: dict):
         print(response.text)
     print("---- payload ----")
     print(json.dumps(payload, indent=2))
+
+
+def count_tokens(messages, model="gpt-4o"):
+    """Count the number of tokens in the messages for the given model."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        encoding = tiktoken.get_encoding("cl100k_base")  # fallback
+    
+    total_tokens = 0
+    for message in messages:
+        # Add tokens for message structure
+        total_tokens += 4  # every message has role, content, etc.
+        for key, value in message.items():
+            if isinstance(value, str):
+                total_tokens += len(encoding.encode(value))
+            elif isinstance(value, list):  # for tool_calls
+                total_tokens += len(encoding.encode(str(value)))
+    
+    total_tokens += 2  # every message ends with assistant/user tokens
+    return total_tokens
 
 
 def get_current_shows():
@@ -323,21 +345,26 @@ LINKING RULES:
         print("   - Missing environment variables")
 
     system_prompt = (
-        "You are a content writer for Houston Broadway Theatre creating HTML blog posts. "
-        "Write engaging content with <h5>, <p>, <strong>, and <ul><li> where useful. "
+        "You are a content writer for Houston Broadway Theatre creating comprehensive HTML blog posts. "
+        "CRITICAL LENGTH REQUIREMENT: Your blog post BODY MUST be 800-1000+ words (minimum 1000+ tokens). This is non-negotiable. "
+        "Write engaging, detailed content with multiple <h5> sections, extensive <p> paragraphs, <strong> emphasis, and detailed explanations. "
         "Return ONLY strict JSON: {\"title\": string, \"summary\": string, \"body\": string}. "
         "Title: 50-60 characters, Houston-specific, "+datetime.now().strftime("%B %Y")+". "
-        "Body: Use <p> tags for paragraphs, <br> for line breaks, <ul><li> for lists. "
-        "Promote Houston Broadway Theatre subtly. Use h5 headers for main points, avoid bullet lists. "
+        "Summary: 100-150 words that captures the main points comprehensively. "
+        "Body: MUST contain at least 5-6 major <h5> sections with substantial content under each. Use <p> tags for paragraphs, <br> for line breaks sparingly. "
+        "Each section should be 150-200 words minimum. Include specific details, examples, quotes, and thorough explanations. "
+        "Promote Houston Broadway Theatre subtly throughout. Be creative with styling - vary paragraph lengths, use descriptive language. "
         "Do not wrap JSON in markdown or add explanations. "
-        "Be detailed and specific, especially with search results and context you are given. "
+        "Be extremely detailed and specific, especially with search results and context you are given. Expand on every point with examples and elaboration. "
         "CRITICAL: Houston Broadway Theatre is DIFFERENT from Hobby Center/Broadway at the Hobby Center. "
         "Only create HBT links for shows explicitly listed in the HBT context. "
-        "Do not create HBT links for Hobby Center shows or other theaters."
+        "Do not create HBT links for Hobby Center shows or other theaters. "
+        "The date is "+datetime.now().strftime("%B %Y")+". Only include relevant information for the current month. "
+        "REMEMBER: The blog post must be substantial, comprehensive, and detailed - aim for 1000+ words with rich, engaging content."
         f"{shows_context}"
     )
 
-    user_prompt = f"Write a 600-800 word blog post about: {topic}"
+    user_prompt = f"Write a 800-1000 word blog post about: {topic}"
 
     print("=" * 80)
     print("🤖 FULL SYSTEM PROMPT BEING SENT TO OPENAI:")
@@ -352,39 +379,86 @@ LINKING RULES:
         {"role": "user", "content": user_prompt},
     ]
 
+    # Count and log token usage
+    input_tokens = count_tokens(messages, "gpt-4o")
+    max_tokens = 128000  # gpt-4o limit
+    token_percentage = (input_tokens / max_tokens) * 100
+    
+    print(f"🔢 INPUT TOKENS: {input_tokens:,} / {max_tokens:,} ({token_percentage:.1f}%)")
+    print(f"📊 Available tokens remaining: {max_tokens - input_tokens:,}")
+
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=messages,
         temperature=0.7,
         tools=tools
     )
     if resp.choices[0].message.tool_calls:
-        tool_call = resp.choices[0].message.tool_calls[0]
-        args = json.loads(tool_call.function.arguments)
-        search_results = search_the_web(args["query"])
-        print(search_results)
+        # Handle all tool calls, not just the first one
+        # Convert ChatCompletionMessage to dict format for OpenAI API
+        assistant_message = {
+            "role": "assistant",
+            "content": resp.choices[0].message.content,
+            "tool_calls": []
+        }
+        
+        # Convert tool calls to dict format
+        for tool_call in resp.choices[0].message.tool_calls:
+            assistant_message["tool_calls"].append({
+                "id": tool_call.id,
+                "type": tool_call.type,
+                "function": {
+                    "name": tool_call.function.name,
+                    "arguments": tool_call.function.arguments
+                }
+            })
+        
+        messages.append(assistant_message)
+        
+        # Process each tool call
+        for tool_call in resp.choices[0].message.tool_calls:
+            args = json.loads(tool_call.function.arguments)
+            search_results = search_the_web(args["query"])
+            print(f"Tool call {tool_call.id}: {search_results}")
 
-        messages.append(resp.choices[0].message)
+            # Use 75% of available tokens for maximum context (96k tokens ≈ 280k characters)
+            search_content = str(search_results)
+            if len(search_content) > 280000:  # Allow maximum search context while staying safe
+                search_content = search_content[:280000] + "... [truncated for length]"
+            
+            # Append tool response for this specific tool call
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": search_content
+            })
         
-        # Use 75% of available tokens for maximum context (96k tokens ≈ 280k characters)
-        search_content = str(search_results)
-        if len(search_content) > 280000:  # Allow maximum search context while staying safe
-            search_content = search_content[:280000] + "... [truncated for length]"
+        # Build valid HBT slugs list for the follow-up
+        valid_hbt_slugs = []
+        if current_shows:
+            for show in current_shows:
+                if show.get('slug'):
+                    valid_hbt_slugs.append(show['slug'])
         
-        messages.append({                               # append result message
-        "role": "tool",
-        "tool_call_id": tool_call.id,
-            "content": search_content
-        })
-        follow_up_content = "Use h5 headers for main points, avoid bullet lists. CRITICAL: Only create HBT links for shows actually listed in the HBT context. Do not create fake HBT links for shows from other theaters."
+        slugs_text = f" Valid HBT show slugs: {', '.join(valid_hbt_slugs)}" if valid_hbt_slugs else " No current HBT shows available"
+        
+        follow_up_content = f"Use h5 headers for main points, avoid bullet lists. CRITICAL: Only create HBT links for shows actually listed in the HBT context. Do not create fake HBT links for shows from other theaters. NEVER create HBT links for tool call search context.{slugs_text}. Only use these exact slugs for houston broadway theatre show links. All other links should be to the corresponding non HBT website, and yes other links are allowed, so long as ther are valid urls to different pages, provided to you in search context. Be smart when linking things - don't just link say 'Check out their website - link -' instead use natural language and just enrich text with the link. Be creative with the styling of the page don't just make it a list of things in a repetitive format. Make sure the post is 700-1000 word, meaning over 1000 tokens AT LEAST."
         
         messages.append({
             "role": "user",
             "content": follow_up_content
         })
 
+        # Count and log token usage for second API call (with search context)
+        input_tokens_with_context = count_tokens(messages, "gpt-4o")
+        token_percentage_with_context = (input_tokens_with_context / max_tokens) * 100
+        
+        print(f"🔢 INPUT TOKENS (with search context): {input_tokens_with_context:,} / {max_tokens:,} ({token_percentage_with_context:.1f}%)")
+        print(f"📊 Available tokens remaining: {max_tokens - input_tokens_with_context:,}")
+        print(f"📈 Token increase from search: +{input_tokens_with_context - input_tokens:,} tokens")
+
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=messages,
             temperature=0.7,
             tools=tools

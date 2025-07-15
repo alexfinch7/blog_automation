@@ -3,4 +3,5 @@ awsgi
 python-dotenv
 openai
 exa_py
-requests 
+requests
+tiktoken
