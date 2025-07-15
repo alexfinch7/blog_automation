@@ -38,6 +38,7 @@ def generate():
 
     backend_log = []
     try:
+        backend_log.append("🤖 Generating blog content with HBT context...")
         blog, raw_results = generate_blog_content(prompt)
         backend_log.append("✅ Blog content generated")
     except Exception as e:

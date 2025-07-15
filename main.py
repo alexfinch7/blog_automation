@@ -22,6 +22,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EXA_API_KEY   = os.getenv("EXA_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
+# Shows collection ID
+SHOWS_COLLECTION_ID = "674ce50f825ea3c7745c89d4"
+
 # NOTE: `Accept-Version` is optional for v2, but explicitly setting it can help avoid
 # accidental downgrades if Webflow releases a major api change in the future.
 HEADERS = {
@@ -134,6 +137,70 @@ def _debug_request_error(response: requests.Response, payload: dict):
     print(json.dumps(payload, indent=2))
 
 
+def get_current_shows():
+    """Fetch current shows from Webflow CMS that haven't closed yet."""
+    endpoint = f"{BASE_URL}/collections/{SHOWS_COLLECTION_ID}/items"
+    
+    print(f"🌐 API Endpoint: {endpoint}")
+    print(f"🔑 Headers: {HEADERS}")
+    
+    try:
+        resp = requests.get(endpoint, headers=HEADERS)
+        print(f"📡 API Response Status: {resp.status_code}")
+        
+        if not resp.ok:
+            print(f"⚠️  Failed to fetch shows: {resp.status_code}")
+            print(f"Response body: {resp.text}")
+            return []
+        
+        data = resp.json()
+        items = data.get("items", [])
+        print(f"📊 Total items from API: {len(items)}")
+        
+        current_shows = []
+        today = datetime.now().date()
+        print(f"📅 Today's date: {today}")
+        
+        for i, item in enumerate(items):
+            field_data = item.get("fieldData", {})
+            show_name = field_data.get("name", f"Show {i+1}")
+            closing_date_str = field_data.get("closing")
+            
+            print(f"\n   🎭 Show {i+1}: {show_name}")
+            print(f"      Closing date string: {closing_date_str}")
+            
+            if closing_date_str:
+                try:
+                    # Parse the closing date (assuming ISO format like "2024-12-31")
+                    closing_date = datetime.fromisoformat(closing_date_str.split('T')[0]).date()
+                    print(f"      Parsed closing date: {closing_date}")
+                    print(f"      Is {closing_date} > {today}? {closing_date > today}")
+                    
+                    # Only include shows that close after today
+                    if closing_date > today:
+                        show_data = {
+                            "name": field_data.get("name", ""),
+                            "slug": field_data.get("slug", ""),
+                            "closing_date": closing_date_str,
+                            "description": field_data.get("description", "")[:200] + "..." if field_data.get("description") else ""
+                        }
+                        current_shows.append(show_data)
+                        print(f"      ✅ Added to current shows: {show_data}")
+                    else:
+                        print(f"      ❌ Show has closed")
+                except (ValueError, AttributeError) as e:
+                    print(f"      ⚠️  Date parsing error: {e}")
+                    continue
+            else:
+                print(f"      ⚠️  No closing date found")
+        
+        print(f"\n📋 Final current shows count: {len(current_shows)}")
+        return current_shows[:5]  # Return up to 5 current shows
+    except Exception as e:
+        print(f"⚠️  Error fetching shows: {e}")
+        return []
+
+
 # ─── AI GENERATION HELPERS ─────────────────────────────────────────────────────
 
 
@@ -163,34 +230,58 @@ tools = [{
 
 # Updated helper ensures the return value is JSON-serialisable (plain dict)
 def search_the_web(query: str):
-    """Search the web for the given query and return a JSON-serialisable dict."""
-    raw_result = exa.search_and_contents(query=query, num_results=5)
+    """Search the web for the given query and return a JSON-serialisable dict with limited content."""
+    raw_result = exa.search_and_contents(query=query, num_results=5)  # Reduced from 5 to 3
 
     # Many exa_py response objects are Pydantic models.  We normalise them to a
     # plain `dict` so that Flask's `jsonify` (and our front-end) can work with
     # the data out-of-the-box.
+    result_data = None
     if isinstance(raw_result, (dict, list)):
-        return raw_result
+        result_data = raw_result
+    else:
+        # Pydantic v2 models expose `model_dump()`, earlier versions expose `dict()`.
+        for attr in ("model_dump", "dict", "to_dict", "json"):
+            if hasattr(raw_result, attr):
+                try:
+                    candidate = getattr(raw_result, attr)()
+                    if isinstance(candidate, (dict, list, str)):
+                        # If we received a JSON string, parse it; otherwise return the dict/list.
+                        if isinstance(candidate, str):
+                            result_data = json.loads(candidate)
+                        else:
+                            result_data = candidate
+                        break
+                except Exception:
+                    pass  # fallthrough to next attr
 
-    # Pydantic v2 models expose `model_dump()`, earlier versions expose `dict()`.
-    for attr in ("model_dump", "dict", "to_dict", "json"):
-        if hasattr(raw_result, attr):
-            try:
-                candidate = getattr(raw_result, attr)()
-                if isinstance(candidate, (dict, list, str)):
-                    # If we received a JSON string, parse it; otherwise return the dict/list.
-                    if isinstance(candidate, str):
-                        return json.loads(candidate)
-                    return candidate
-            except Exception:
-                pass  # fallthrough to next attr
+    if not result_data:
+        # Fallback: attempt a best-effort serialisation via json.dumps -> loads.
+        try:
+            result_data = json.loads(json.dumps(raw_result, default=lambda o: getattr(o, "__dict__", str(o))))
+        except Exception:
+            # As a last resort, stringify the response so at least something is returned.
+            return {"data": {"results": [], "raw": str(raw_result)}}
 
-    # Fallback: attempt a best-effort serialisation via json.dumps -> loads.
-    try:
-        return json.loads(json.dumps(raw_result, default=lambda o: getattr(o, "__dict__", str(o))))
-    except Exception:
-        # As a last resort, stringify the response so at least something is returned.
-        return {"data": {"results": [], "raw": str(raw_result)}}
+    # Limit the content length to prevent token overflow
+    if isinstance(result_data, dict) and "results" in result_data:
+        limited_results = []
+        for result in result_data["results"][:5]:  # Keep all 5 results
+            limited_result = {}
+            # Copy basic fields
+            for field in ["url", "title", "published_date", "author"]:
+                if field in result:
+                    limited_result[field] = result[field]
+            
+            # Keep full text content for maximum context richness
+            if "text" in result and result["text"]:
+                limited_result["text"] = result["text"][:25000] + "..." if len(result["text"]) > 25000 else result["text"]
+            
+            limited_results.append(limited_result)
+        
+        return {"results": limited_results}
+    
+    return result_data
 
 
 def generate_blog_content(topic: str) -> dict:
@@ -198,21 +289,63 @@ def generate_blog_content(topic: str) -> dict:
 
     Returns dict with keys: title, summary, body (HTML string).
     """
+    # Get current shows for context
+    print("🔍 Fetching current shows...")
+    current_shows = get_current_shows()
+    print(f"📊 Got {len(current_shows) if current_shows else 0} current shows")
+    print(f"📋 Current shows data: {current_shows}")
+    
+    shows_context = ""
+    if current_shows:
+        print("✅ Building shows context...")
+        shows_list = []
+        for show in current_shows:
+            shows_list.append(f"- {show['name']} (closes {show['closing_date']}) - slug: {show['slug']}")
+        shows_context = f"""
+
+CURRENT SHOWS AT HOUSTON BROADWAY THEATRE:
+{chr(10).join(shows_list)}
+
+LINKING RULES:
+- ONLY link "Houston Broadway Theatre" to https://www.houstonbroadwaytheatre.org
+- ONLY create show links for HBT shows listed above using https://www.houstonbroadwaytheatre.org/shows/{{slug}}
+- DO NOT create HBT links for shows from other theaters (Hobby Center, etc.)
+- DO NOT make up show slugs or links
+- If a show is not in the HBT list above, link to its actual theater's website instead
+"""
+        print(f"📝 Shows context built: {shows_context[:200]}...")
+    else:
+        print("❌ No current shows found - shows_context will be empty")
+        print("🔧 This could be due to:")
+        print("   - API connection issues")
+        print("   - All shows have closing dates in the past") 
+        print("   - Wrong collection ID")
+        print("   - Missing environment variables")
+
     system_prompt = (
-        "You are a senior content writer for Houston Broadway Theatre creating HTML blog posts"
-        "Write engaging content with <h5>, <p>, <strong>, and <ul><li> where useful. h5 is the largest heading you can use."
-        "When you answer, respond ONLY with strict JSON in this shape: "
-        "{\"title\": string, \"summary\": string, \"body\": string}. "
-        "Newlines in the post body should be represented as <br> tags. Wrap paragraphs in <p> tags. And use <ul>, ol, and <li> for lists."
-        "This for webflow, so make the post body formatted for webflow."
-        "When possible, the title should be specific to the location - Houston, and the date -"+datetime.now().strftime("%B %d, %Y")+". Eg. Best musicals to see in Houston September 2025. Do not include the specific day though."
-        "The title should be between 50 and 60 characters in length (including spaces)."
-        "Do NOT wrap the JSON in markdown or add explanations."
-        "Your blog posts are for the purpose of promoting Houston Broadway Theatre and its upcoming shows, so make sure to add Houston Broadway Theatre as a primary focus for whatever the topic is of the blog post."
-        "Do not make things up. Do not just create a list of bullet points. Main points should be in the h5 header."
+        "You are a content writer for Houston Broadway Theatre creating HTML blog posts. "
+        "Write engaging content with <h5>, <p>, <strong>, and <ul><li> where useful. "
+        "Return ONLY strict JSON: {\"title\": string, \"summary\": string, \"body\": string}. "
+        "Title: 50-60 characters, Houston-specific, "+datetime.now().strftime("%B %Y")+". "
+        "Body: Use <p> tags for paragraphs, <br> for line breaks, <ul><li> for lists. "
+        "Promote Houston Broadway Theatre subtly. Use h5 headers for main points, avoid bullet lists. "
+        "Do not wrap JSON in markdown or add explanations. "
+        "Be detailed and specific, especially with search results and context you are given. "
+        "CRITICAL: Houston Broadway Theatre is DIFFERENT from Hobby Center/Broadway at the Hobby Center. "
+        "Only create HBT links for shows explicitly listed in the HBT context. "
+        "Do not create HBT links for Hobby Center shows or other theaters."
+        f"{shows_context}"
     )
 
     user_prompt = f"Write a 600-800 word blog post about: {topic}"
+
+    print("=" * 80)
+    print("🤖 FULL SYSTEM PROMPT BEING SENT TO OPENAI:")
+    print("=" * 80)
+    print(system_prompt)
+    print("=" * 80)
+    print(f"📝 USER PROMPT: {user_prompt}")
+    print("=" * 80)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -232,14 +365,22 @@ def generate_blog_content(topic: str) -> dict:
         print(search_results)
 
         messages.append(resp.choices[0].message)
+        
+        # Use 75% of available tokens for maximum context (96k tokens ≈ 280k characters)
+        search_content = str(search_results)
+        if len(search_content) > 280000:  # Allow maximum search context while staying safe
+            search_content = search_content[:280000] + "... [truncated for length]"
+        
         messages.append({                               # append result message
         "role": "tool",
         "tool_call_id": tool_call.id,
-            "content": str(search_results)
+            "content": search_content
         })
+        follow_up_content = "Use h5 headers for main points, avoid bullet lists. CRITICAL: Only create HBT links for shows actually listed in the HBT context. Do not create fake HBT links for shows from other theaters."
+        
         messages.append({
             "role": "user",
-            "content":"Remember to advertise Houston Broadway Theatre in the blog post, either as a primary list item, or in the introduction, if its not directly related to the topic. Never make a bulletted list of items, main items should be in the h5 header."
+            "content": follow_up_content
         })
 
         resp = client.chat.completions.create(
