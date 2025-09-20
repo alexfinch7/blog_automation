@@ -5,3 +5,5 @@ openai
 exa_py
 requests
 tiktoken
+python-dateutil
+beautifulsoup4

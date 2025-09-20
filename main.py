@@ -8,6 +8,8 @@ from datetime import datetime
 from exa_py import Exa
 from dotenv import load_dotenv
 import tiktoken
+from urllib.parse import urlparse, urljoin
+import dateutil.parser
 
 # Load variables from a local .env file (ignored by git) so os.getenv picks them up
 load_dotenv()
@@ -25,6 +27,12 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
 # Shows collection ID
 SHOWS_COLLECTION_ID = "674ce50f825ea3c7745c89d4"
+
+# Press collection ID
+PRESS_COLLECTION_ID = "6751208afddafb40e3d7d5a9"
+
+# Categories collection ID (for Press categories)
+CATEGORIES_COLLECTION_ID = "67511f12c13b5f41c8778298"
 
 # NOTE: `Accept-Version` is optional for v2, but explicitly setting it can help avoid
 # accidental downgrades if Webflow releases a major api change in the future.
@@ -118,12 +126,259 @@ def create_blog_post(
     return item
 
 
+def create_press_article(
+    name: str,
+    slug: str,
+    title: str = None,
+    preview_image: dict = None,
+    main_image: dict = None,
+    author: str = None,
+    outlet: str = None,
+    publish_date: str = None,
+    body_text: str = None,
+    read_more_url: str = None,
+    show: str = None,
+    category: str = None,
+    publish: bool = False
+):
+    """
+    Creates a CMS Item in your Press collection.
+
+    Required:
+      - name  (maps to the 'Title (long)' field)
+      - slug  (maps to the 'Slug' field)
+
+    Optional, matching your actual schema:
+      - title            (Plain text) - maps to "title" field
+      - preview_image    (Image dict) - maps to "preview-image"
+      - main_image       (Image dict) - maps to "main-image"
+      - author           (Plain text) - maps to "author"
+      - outlet           (Plain text) - maps to "outlet"
+      - publish_date     (Date/Time) - maps to "publish-date"
+      - body_text        (Rich text) - maps to "body-text"
+      - read_more_url    (Link) - maps to "read-more-url"
+      - show             (Reference) - maps to "show"
+      - category         (Reference) - maps to "category"
+    """
+    endpoint = f"{BASE_URL}/collections/{PRESS_COLLECTION_ID}/items"
+
+    # Build only the fields your collection actually needs.
+    field_data = {
+        "name": name,
+        "slug": slug,
+    }
+
+    # Only add fields that exist in the press collection schema
+    if title is not None:
+        field_data["title"] = title
+    if preview_image is not None:
+        field_data["preview-image"] = preview_image
+    if main_image is not None:
+        field_data["main-image"] = main_image
+    if author is not None:
+        field_data["author"] = author
+    if outlet is not None:
+        field_data["outlet"] = outlet
+    if publish_date is not None:
+        field_data["publish-date"] = publish_date
+    if body_text is not None:
+        field_data["body-text"] = body_text
+    if read_more_url is not None:
+        field_data["read-more-url"] = read_more_url
+    if show is not None:
+        field_data["show"] = show
+    if category is not None:
+        field_data["category"] = category
+
+    payload = {
+        "isDraft": not publish,  # create as draft if we will NOT publish later
+        "isArchived": False,
+        "fieldData": field_data
+    }
+
+    resp = requests.post(endpoint, headers=HEADERS, json=payload)
+
+    if not resp.ok:
+        _debug_request_error(resp, payload)
+        resp.raise_for_status()
+
+    item = resp.json()
+
+    # If caller wants the item published immediately, trigger the publish endpoint.
+    if publish:
+        publish_resp = _publish_items([item["id"]])
+        # Webflow returns 202 on success. We can optionally inspect the response.
+        if publish_resp.status_code not in (200, 202):
+            print("⚠️  Publish request responded with", publish_resp.status_code)
+            print(publish_resp.text)
+
+    return item
+
+
+def extract_article_content(url: str):
+    """
+    Extract article content from a URL using Exa API and OpenAI for content cleaning.
+    Returns a dictionary with extracted content.
+    """
+    try:
+        # Use Exa API to get content
+        result = exa.get_contents([url], text=True)
+        print(f"Exa result: {result}")
+        
+        if not result.results or len(result.results) == 0:
+            raise Exception("No content found by Exa API")
+        
+        exa_result = result.results[0]
+        
+        # Extract basic info from Exa result
+        title = exa_result.title or "Untitled Article"
+        author = exa_result.author or ""
+        publish_date = exa_result.published_date
+        raw_text = exa_result.text
+        main_image_url = exa_result.image
+        
+        # Format publish date if available
+        formatted_date = None
+        if publish_date:
+            try:
+                parsed_date = dateutil.parser.parse(publish_date)
+                formatted_date = parsed_date.isoformat()
+            except:
+                formatted_date = publish_date
+        
+        # Use OpenAI to clean up and format the raw text into proper HTML
+        cleanup_prompt = f"""
+        You are an expert content editor. Given the raw text content from a press article, extract and format the main article body content into clean HTML. 
+        
+        Instructions:
+        1. Remove navigation menus, headers, footers, and other non-article content
+        2. Focus on the main article text and quotes
+        3. Format the content with proper HTML tags - DO NOT USE ANY HEADINGS GREATER THAN H5, DO NOT USE ANY BLOCKQUOTES. Feel free to use h5 bold and italic tags.
+        5. Preserve the structure and meaning of the article
+        6. Remove duplicate content and redundant information
+        7. Make sure the output is clean, readable HTML suitable for a CMS
+        8. Only return the HTML content, no other text or explanation, or '''html ''' tags
+        9. The title of the article does not need to be included.
+        Raw text content:
+        {raw_text}
+        
+        Return only the cleaned HTML content for the article body, no other text or explanation.
+        """
+        
+        try:
+            cleanup_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert content editor that formats article content into clean HTML."},
+                    {"role": "user", "content": cleanup_prompt}
+                ],
+                temperature=0.3
+            )
+            body_text = cleanup_response.choices[0].message.content.strip()
+        except Exception as e:
+            # Fallback: use basic text processing if OpenAI fails
+            lines = raw_text.split('\n')
+            body_parts = []
+            for line in lines:
+                line = line.strip()
+                if line and len(line) > 20 and not line.startswith(('http', 'www', '#', '-', '•')):
+                    # Check if it looks like a heading
+                    if line.isupper() or (line.endswith(':') and len(line) < 100):
+                        body_parts.append(f"<h3>{line}</h3>")
+                    else:
+                        body_parts.append(f"<p>{line}</p>")
+            body_text = "\n".join(body_parts)
+        
+        # Extract domain for outlet field
+        from urllib.parse import urlparse
+        parsed_url = urlparse(url)
+        outlet = parsed_url.netloc.replace('www.', '').title()
+        
+        # Collect images from the page (OpenGraph, Twitter, and <img> tags)
+        images = []
+        seen = set()
+
+        def add_image(img_url: str, alt_text: str = ""):
+            if not img_url:
+                return
+            # Resolve relative URLs and filter unsupported schemes
+            absolute = urljoin(url, img_url)
+            if not absolute.startswith(("http://", "https://")):
+                return
+            # Skip data URIs or svg icons and duplicates
+            if absolute.startswith("data:"):
+                return
+            lower = absolute.lower()
+            if any(lower.endswith(ext) for ext in (".svg")):
+                return
+            if absolute in seen:
+                return
+            seen.add(absolute)
+            images.append({"url": absolute, "alt": (alt_text or title)})
+
+        # Seed with Exa's main image first if present
+        if main_image_url:
+            add_image(main_image_url, title)
+
+        # Fetch the HTML to scrape additional images
+        try:
+            resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0 (compatible; HBTBot/1.0)"})
+            if resp.ok:
+                html = resp.text
+                # Parse meta image tags
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(html, "html.parser")
+                    # OpenGraph / Twitter images
+                    for selector, attr in (("meta[property='og:image']", "content"), ("meta[name='twitter:image']", "content")):
+                        for tag in soup.select(selector):
+                            add_image(tag.get(attr))
+                    # All <img> tags
+                    for img in soup.find_all("img"):
+                        src = img.get("src") or img.get("data-src") or img.get("data-original")
+                        if not src and img.get("srcset"):
+                            # Pick the last (largest) candidate in srcset
+                            try:
+                                candidates = [c.strip().split(" ")[0] for c in img.get("srcset").split(",") if c.strip()]
+                                if candidates:
+                                    src = candidates[-1]
+                            except Exception:
+                                pass
+                        alt_text = img.get("alt") or title
+                        add_image(src, alt_text)
+                except Exception:
+                    pass
+        except Exception:
+            # Ignore scraping errors; we still have main image
+            pass
+        
+        return {
+            'title': title,
+            'author': author,
+            'publish_date': formatted_date,
+            'body_text': body_text,
+            'main_image_url': main_image_url,
+            'images': images,
+            'source_url': url,
+            'outlet': outlet
+        }
+        
+    except Exception as e:
+        raise Exception(f"Failed to extract article content: {str(e)}")
+
+
 # ─── INTERNAL HELPERS ──────────────────────────────────────────────────────────
 
 
 def _publish_items(item_ids):
     """Publish one or more CMS items using the v2 publish endpoint."""
     publish_endpoint = f"{BASE_URL}/collections/{COLLECTION_ID}/items/publish"
+    return requests.post(publish_endpoint, headers=HEADERS, json={"itemIds": item_ids})
+
+
+def _publish_items_for_collection(collection_id: str, item_ids):
+    """Publish items for a specific collection (e.g., blog or press)."""
+    publish_endpoint = f"{BASE_URL}/collections/{collection_id}/items/publish"
     return requests.post(publish_endpoint, headers=HEADERS, json={"itemIds": item_ids})
 
 
@@ -222,6 +477,81 @@ def get_current_shows():
         print(f"⚠️  Error fetching shows: {e}")
         return []
 
+
+# ─── GENERIC COLLECTION HELPERS ────────────────────────────────────────────────
+
+
+def get_collection_items(collection_id: str) -> list[dict]:
+    """Fetch all items from a Webflow collection (id, name, slug)."""
+    endpoint = f"{BASE_URL}/collections/{collection_id}/items"
+    try:
+        resp = requests.get(endpoint, headers=HEADERS)
+        if not resp.ok:
+            return []
+        data = resp.json()
+        items = []
+        for item in data.get("items", []):
+            field_data = item.get("fieldData", {})
+            items.append({
+                "id": item.get("id"),
+                "name": field_data.get("name", ""),
+                "slug": field_data.get("slug", "")
+            })
+        return items
+    except Exception:
+        return []
+
+
+# ─── AI SELECTION FOR SHOW & CATEGORY ─────────────────────────────────────────
+
+
+def choose_show_and_category(title: str, body_html: str, outlet: str, shows: list[dict], categories: list[dict]) -> dict:
+    """Use AI to choose the most relevant show and category IDs from options."""
+    shows_data = [{"id": s.get("id"), "name": s.get("name"), "slug": s.get("slug")} for s in shows]
+    cats_data = [{"id": c.get("id"), "name": c.get("name"), "slug": c.get("slug")} for c in categories]
+
+    system_prompt = (
+        "You are assigning metadata for a press article. Given the article title, outlet, and HTML body, "
+        "pick the best matching Show and Category from the provided options. If no reasonable match exists for Show, return null. "
+        "Return ONLY strict JSON: {\"showId\": string|null, \"categoryId\": string}."
+    )
+    user_payload = {
+        "title": title,
+        "outlet": outlet,
+        "body": body_html[:4000],  # cap to avoid overlong prompts
+        "shows": shows_data,
+        "categories": cats_data,
+    }
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload)}
+            ],
+            temperature=0.2,
+        )
+        content = resp.choices[0].message.content.strip()
+        content = re.sub(r"^```json\s*|```$", "", content, flags=re.DOTALL)
+        data = json.loads(content)
+        show_id = data.get("showId")
+        category_id = data.get("categoryId")
+        # Validate IDs
+        valid_show_ids = {s["id"] for s in shows_data if s.get("id")}
+        valid_cat_ids = {c["id"] for c in cats_data if c.get("id")}
+        if show_id not in valid_show_ids:
+            show_id = None
+        if category_id not in valid_cat_ids:
+            # fallback: pick first category if AI failed
+            category_id = next(iter(valid_cat_ids), None)
+        return {"showId": show_id, "categoryId": category_id}
+    except Exception:
+        # Fallback: no show, first category if available
+        return {
+            "showId": None,
+            "categoryId": categories[0]["id"] if categories else None
+        }
 
 # ─── AI GENERATION HELPERS ─────────────────────────────────────────────────────
 

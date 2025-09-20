@@ -8,14 +8,16 @@
   <style>
     /* Fallback CSS in case external stylesheet doesn't load */
     body {font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #fafafa;}
-    .container {max-width: 700px; margin: 2rem auto; background:#fff; padding:2rem 2.5rem; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.08);}
+    .main-container {max-width: 1400px; margin: 2rem auto; display: flex; gap: 2rem; padding: 0 1rem;}
+    .generator-column {flex: 1; background:#fff; padding:2rem 2.5rem; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.08); min-height: 500px;}
     .hidden {display:none;}
     label {display:block; margin-bottom:0.5rem; font-weight:600;}
     input, textarea {width:100%; padding:0.6rem; font-size:1rem; margin-bottom:1rem; border:1px solid #ccc; border-radius:4px; box-sizing: border-box;}
     button {background:#6f42c1; color:#fff; border:none; padding:0.6rem 1.2rem; font-size:1rem; border-radius:4px; cursor:pointer; margin-right: 0.5rem; margin-bottom: 0.5rem;}
     button:disabled {opacity:0.6; cursor:not-allowed;}
+    .press-btn {background:#2d5aa0;}
     .progress {margin-top:1rem; position:relative; height:8px; background:#eee; border-radius:4px;}
-    .progress #bar {position:absolute; left:0; top:0; height:100%; width:0; background:#6f42c1; border-radius:4px; transition:width 0.3s;}
+    .progress .bar {position:absolute; left:0; top:0; height:100%; width:0; background:#6f42c1; border-radius:4px; transition:width 0.3s;}
     .log{background:#272822; color:#f8f8f2; padding:1rem; max-height:150px; overflow:auto; border-radius:4px; font-size:0.8rem;}
     .image-options{display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;}
     .image-option img{width:120px;height:80px;object-fit:cover;border-radius:4px;border:2px solid transparent;}
@@ -25,6 +27,11 @@
     #imageSearchInput {margin-bottom:0.5rem;}
     #imageSearchBtn {margin-bottom:1rem;}
     #customImageOptions {margin-top:0.5rem;}
+    
+    @media (max-width: 768px) {
+      .main-container {flex-direction: column; margin: 1rem; padding: 0;}
+      .generator-column {margin-bottom: 1rem;}
+    }
     
     /* Loading spinner styles */
     .loading-spinner {
@@ -50,61 +57,127 @@
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Houston Broadway Theatre Blog Generator</h1>
+  <div class="main-container">
+    <!-- Blog Generator Column -->
+    <div class="generator-column">
+      <h1>Houston Broadway Theatre Blog Generator</h1>
 
-    <label for="prompt">Blog topic / prompt</label>
-    <input id="prompt" type="text" placeholder="e.g. Best musicals to see in Houston this fall" />
+      <label for="prompt">Blog topic / prompt</label>
+      <input id="prompt" type="text" placeholder="e.g. Best musicals to see in Houston this fall" />
 
-    <button id="generateBtn">Generate Draft<span id="loadingSpinner" class="loading-spinner hidden"></span></button>
+      <button id="generateBtn">Generate Draft<span id="loadingSpinner" class="loading-spinner hidden"></span></button>
 
-    <div id="editor" class="hidden">
-      <h3>Blog Content</h3>
-      <label>Title</label>
-      <input id="titleInput" type="text" />
-      <label>Summary</label>
-      <textarea id="summaryInput" rows="3"></textarea>
-      <label>Body (HTML)</label>
-      <textarea id="bodyInput" rows="10"></textarea>
+      <div id="editor" class="hidden">
+        <h3>Blog Content</h3>
+        <label>Title</label>
+        <input id="titleInput" type="text" />
+        <label>Summary</label>
+        <textarea id="summaryInput" rows="3"></textarea>
+        <label>Body (HTML)</label>
+        <textarea id="bodyInput" rows="10"></textarea>
 
-      <h4>Preview</h4>
-      <div id="bodyPreview" class="body-preview"></div>
+        <h4>Preview</h4>
+        <div id="bodyPreview" class="body-preview"></div>
 
-      <h4>Edit with AI</h4>
-      <textarea id="aiEditInput" rows="2" placeholder="e.g. make tone more conversational"></textarea>
-      <button id="aiEditBtn">Apply AI Edit</button>
+        <h4>Edit with AI</h4>
+        <textarea id="aiEditInput" rows="2" placeholder="e.g. make tone more conversational"></textarea>
+        <button id="aiEditBtn">Apply AI Edit</button>
 
-      <h3>Select Cover Image</h3>
-      <div id="imageOptions" class="image-options"></div>
-      
-      <h4>Search for Different Images</h4>
-      <input id="imageSearchInput" type="text" placeholder="e.g. theater, musical, Broadway, stage" />
-      <button id="imageSearchBtn">Search Unsplash</button>
-      <div id="customImageOptions" class="image-options"></div>
-      
-      <button id="createBtn">Create Webflow Draft</button>
+        <h3>Select Cover Image</h3>
+        <div id="imageOptions" class="image-options"></div>
+        
+        <h4>Search for Different Images</h4>
+        <input id="imageSearchInput" type="text" placeholder="e.g. theater, musical, Broadway, stage" />
+        <button id="imageSearchBtn">Search Unsplash</button>
+        <div id="customImageOptions" class="image-options"></div>
+        
+        <button id="createBtn">Create Webflow Draft</button>
+      </div>
+
+      <div id="progress" class="progress hidden">
+        <div id="bar" class="bar"></div>
+        <span id="status">Starting…</span>
+      </div>
+
+      <div id="result" class="hidden">
+        <h2>Draft created!</h2>
+        <p><a id="previewLink" target="_blank" rel="noopener">Preview in Webflow ↗</a></p>
+        <button id="publishBtn">Publish</button>
+        <span id="publishStatus"></span>
+      </div>
+
+      <div id="contextSection" class="hidden">
+        <h3>Context:</h3>
+        <div class="context-box"></div>
+      </div>
+
+      <h3>Logs</h3>
+      <pre id="log" class="log"></pre>
     </div>
 
-    <div id="progress" class="progress hidden">
-      <div id="bar"></div>
-      <span id="status">Starting…</span>
-    </div>
+    <!-- Press Generator Column -->
+    <div class="generator-column">
+      <h1>Houston Broadway Theatre Press Generator</h1>
 
-    <div id="result" class="hidden">
-      <h2>Draft created!</h2>
-      <p><a id="previewLink" target="_blank" rel="noopener">Preview in Webflow ↗</a></p>
-      <button id="publishBtn">Publish</button>
-      <span id="publishStatus"></span>
-    </div>
+      <label for="pressUrl">Article URL</label>
+      <input id="pressUrl" type="url" placeholder="e.g. https://example.com/article-about-hbt" />
 
-    <div id="contextSection" class="hidden">
-      <h3>Context:</h3>
-      <div class="context-box"></div>
-    </div>
+      <button id="extractBtn" class="press-btn">Extract Article<span id="extractSpinner" class="loading-spinner hidden"></span></button>
 
-    <h3>Logs</h3>
-    <pre id="log" class="log"></pre>
-  </div>
+      <div id="pressEditor" class="hidden">
+        <h3>Article Content</h3>
+        <label>Title (Long)</label>
+        <input id="pressTitleInput" type="text" />
+        <label>Title (Short)</label>
+        <input id="pressTitleShortInput" type="text" />
+        <label>Author</label>
+        <input id="pressAuthorInput" type="text" />
+        <label>Outlet</label>
+        <input id="pressOutletInput" type="text" />
+        <label>Publish Date</label>
+        <input id="pressDateInput" type="datetime-local" />
+        <label>Show</label>
+        <select id="pressShowSelect"></select>
+        <label>Category</label>
+        <select id="pressCategorySelect"></select>
+        <label>Body Text (HTML)</label>
+        <textarea id="pressBodyInput" rows="10"></textarea>
+
+        <h4>Preview</h4>
+        <div id="pressPreview" class="body-preview"></div>
+
+        <h3>Images</h3>
+        <div id="pressImagesSection" class="hidden">
+          <h4>Select Main Image</h4>
+          <div id="pressMainImageOptions" class="image-options"></div>
+          <h4>Select Thumbnail/Preview Image</h4>
+          <div id="pressPreviewImageOptions" class="image-options"></div>
+        </div>
+
+        <div id="pressImagePreview" class="hidden">
+          <img id="pressMainImage" style="max-width: 200px; border-radius: 4px;" />
+          <p id="pressImageUrl" style="font-size: 0.8rem; color: #666;"></p>
+        </div>
+        
+        <button id="createPressBtn" class="press-btn">Create Webflow Draft</button>
+      </div>
+
+      <div id="pressProgress" class="progress hidden">
+        <div id="pressBar" class="bar"></div>
+        <span id="pressStatus">Starting…</span>
+      </div>
+
+      <div id="pressResult" class="hidden">
+        <h2>Press article created!</h2>
+        <p><a id="pressPreviewLink" target="_blank" rel="noopener">Preview in Webflow ↗</a></p>
+        <button id="publishPressBtn" class="press-btn">Publish</button>
+        <span id="pressPublishStatus"></span>
+      </div>
+
+      <h3>Press Logs</h3>
+      <pre id="pressLog" class="log"></pre>
+    </div>
+  </div></body>
 
   <script>
     const generateBtn = document.getElementById('generateBtn');
@@ -131,15 +204,74 @@
     const imageSearchBtn = document.getElementById('imageSearchBtn');
     const customImageOptions = document.getElementById('customImageOptions');
 
+    // Press generator elements
+    const extractBtn = document.getElementById('extractBtn');
+    const pressUrlInput = document.getElementById('pressUrl');
+    const extractSpinner = document.getElementById('extractSpinner');
+    const pressEditor = document.getElementById('pressEditor');
+    const pressTitleInput = document.getElementById('pressTitleInput');
+    const pressTitleShortInput = document.getElementById('pressTitleShortInput');
+    const pressAuthorInput = document.getElementById('pressAuthorInput');
+    const pressOutletInput = document.getElementById('pressOutletInput');
+    const pressDateInput = document.getElementById('pressDateInput');
+    const pressShowSelect = document.getElementById('pressShowSelect');
+    const pressCategorySelect = document.getElementById('pressCategorySelect');
+    const pressBodyInput = document.getElementById('pressBodyInput');
+    const pressPreview = document.getElementById('pressPreview');
+    const pressImagePreview = document.getElementById('pressImagePreview');
+    const pressMainImage = document.getElementById('pressMainImage');
+    const pressImageUrl = document.getElementById('pressImageUrl');
+    const pressImagesSection = document.getElementById('pressImagesSection');
+    const pressMainImageOptions = document.getElementById('pressMainImageOptions');
+    const pressPreviewImageOptions = document.getElementById('pressPreviewImageOptions');
+    const createPressBtn = document.getElementById('createPressBtn');
+    const pressProgress = document.getElementById('pressProgress');
+    const pressBar = document.getElementById('pressBar');
+    const pressStatus = document.getElementById('pressStatus');
+    const pressResult = document.getElementById('pressResult');
+    const pressPreviewLink = document.getElementById('pressPreviewLink');
+    const publishPressBtn = document.getElementById('publishPressBtn');
+    const pressPublishStatus = document.getElementById('pressPublishStatus');
+    const pressLogEl = document.getElementById('pressLog');
+
     let itemId;
     let currentSlug;
+    let pressItemId;
+    let pressSlug;
+    let pressMainImageUrl;
+    let pressPreviewImageUrl;
+
+    function ensureReviewPrefix(){
+      const selectedText = pressCategorySelect.options[pressCategorySelect.selectedIndex]?.text?.trim().toLowerCase() || '';
+      const isReview = (selectedText === 'reviews' || selectedText === 'review');
+      const prefix = 'REVIEW: ';
+
+      function applyPrefix(el){
+        const current = el.value || '';
+        const hasPrefix = current.startsWith(prefix);
+        if(isReview && !hasPrefix){
+          el.value = prefix + current;
+        } else if(!isReview && hasPrefix){
+          el.value = current.substring(prefix.length);
+        }
+      }
+
+      applyPrefix(pressTitleInput);
+      applyPrefix(pressTitleShortInput);
+    }
 
     function updateProgress(step, pct) {
       status.textContent = step;
       bar.style.width = pct + '%';
     }
 
+    function updatePressProgress(step, pct) {
+      pressStatus.textContent = step;
+      pressBar.style.width = pct + '%';
+    }
+
     function log(msg){logEl.textContent+=msg+'\n';}
+    function pressLog(msg){pressLogEl.textContent+=msg+'\n';}
 
     generateBtn.addEventListener('click', async () => {
       const prompt = promptInput.value.trim();
@@ -333,6 +465,215 @@
     });
 
     function slugify(str){return str.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').substring(0,256);}
+
+    // Press generator event listeners
+    extractBtn.addEventListener('click', async () => {
+      const url = pressUrlInput.value.trim();
+      if (!url) return alert('Enter an article URL');
+
+      extractBtn.disabled = true;
+      extractBtn.innerHTML = 'Extracting...<span id="extractSpinner" class="loading-spinner"></span>';
+      pressResult.classList.add('hidden');
+
+      try {
+        const res = await fetch('/extract_press', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        if (!res.ok){
+          const errText = await res.text();
+          pressLog(errText);
+          throw new Error(errText);
+        }
+        const data = await res.json();
+
+        // Populate form fields
+        pressTitleInput.value = data.title;
+        pressTitleShortInput.value = data.title.length > 50 ? data.title.substring(0, 50) + '...' : data.title;
+        pressAuthorInput.value = data.author || '';
+        pressOutletInput.value = data.outlet || '';
+        // Populate show and category dropdowns
+        pressShowSelect.innerHTML = '';
+        const shows = Array.isArray(data.shows) ? data.shows : [];
+        const defaultShowId = data.default_show_id || '';
+        const noneOption = document.createElement('option');
+        noneOption.value = '';
+        noneOption.textContent = 'None';
+        pressShowSelect.appendChild(noneOption);
+        shows.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id || '';
+          opt.textContent = s.name || '';
+          if (defaultShowId && s.id === defaultShowId) opt.selected = true;
+          pressShowSelect.appendChild(opt);
+        });
+
+        pressCategorySelect.innerHTML = '';
+        const cats = Array.isArray(data.categories) ? data.categories : [];
+        const defaultCatId = data.default_category_id || '';
+        cats.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.id || '';
+          opt.textContent = c.name || '';
+          if (defaultCatId && c.id === defaultCatId) opt.selected = true;
+          pressCategorySelect.appendChild(opt);
+        });
+
+        // Apply title prefix logic based on default category and listen for changes
+        ensureReviewPrefix();
+        pressCategorySelect.addEventListener('change', ensureReviewPrefix);
+        pressBodyInput.value = data.body_text;
+        pressPreview.innerHTML = data.body_text;
+
+        // Handle date
+        if (data.publish_date) {
+          const date = new Date(data.publish_date);
+          pressDateInput.value = date.toISOString().slice(0, 16);
+        }
+
+        // Build selectable image options from all scraped images
+        pressMainImageOptions.innerHTML = '';
+        pressPreviewImageOptions.innerHTML = '';
+        const imgs = Array.isArray(data.images) ? data.images : [];
+        if (imgs.length > 0) {
+          imgs.forEach((img, idx) => {
+            const u = img.url || '';
+            const a = img.alt || data.title || '';
+            const mainWrap = document.createElement('div');
+            mainWrap.className = 'image-option';
+            mainWrap.innerHTML = `<label><input type='radio' name='press-main' value='${u}' ${idx===0?'checked':''}> <img src='${u}' alt='${a}'></label>`;
+            pressMainImageOptions.appendChild(mainWrap);
+            const prevWrap = document.createElement('div');
+            prevWrap.className = 'image-option';
+            prevWrap.innerHTML = `<label><input type='radio' name='press-preview' value='${u}' ${idx===0?'checked':''}> <img src='${u}' alt='${a}'></label>`;
+            pressPreviewImageOptions.appendChild(prevWrap);
+          });
+          pressImagesSection.classList.remove('hidden');
+          // Set initial preview based on first image
+          const first = imgs[0].url;
+          pressMainImageUrl = first;
+          pressPreviewImageUrl = first;
+          pressMainImage.src = first;
+          pressImageUrl.textContent = first;
+          pressImagePreview.classList.remove('hidden');
+        } else if (data.main_image_url) {
+          // Fallback to single main image
+          pressMainImage.src = data.main_image_url;
+          pressImageUrl.textContent = data.main_image_url;
+          pressImagePreview.classList.remove('hidden');
+          pressMainImageUrl = data.main_image_url;
+          pressPreviewImageUrl = data.main_image_url;
+        }
+
+        // Keep preview image display in sync with selected main image
+        document.addEventListener('change', (e) => {
+          if (e.target && e.target.name === 'press-main') {
+            pressMainImageUrl = e.target.value;
+            pressMainImage.src = pressMainImageUrl;
+            pressImageUrl.textContent = pressMainImageUrl;
+          }
+          if (e.target && e.target.name === 'press-preview') {
+            pressPreviewImageUrl = e.target.value;
+          }
+        }, { once: false });
+
+        // Add preview update listener
+        pressBodyInput.addEventListener('input', () => {
+          pressPreview.innerHTML = pressBodyInput.value;
+        });
+
+        pressEditor.classList.remove('hidden');
+        if(data.log){pressLog(data.log);}
+        extractBtn.innerHTML = 'Extract Article<span id="extractSpinner" class="loading-spinner hidden"></span>';
+      } catch (err) {
+        alert('Error: ' + err);
+        pressLog(err);
+        extractBtn.innerHTML = 'Extract Article<span id="extractSpinner" class="loading-spinner hidden"></span>';
+      } finally {
+        extractBtn.disabled = false;
+      }
+    });
+
+    createPressBtn.addEventListener('click', async () => {
+      const title = pressTitleInput.value.trim();
+      const bodyText = pressBodyInput.value.trim();
+      
+      if (!title || !bodyText) {
+        alert('Title and body text are required');
+        return;
+      }
+
+      createPressBtn.disabled = true;
+      updatePressProgress('Creating press article...', 50);
+      pressProgress.classList.remove('hidden');
+
+      try {
+        const slug = slugify(title);
+        const res = await fetch('/create_press', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title,
+            slug: slug,
+            titleShort: pressTitleShortInput.value,
+            author: pressAuthorInput.value,
+            outlet: pressOutletInput.value,
+            publishDate: pressDateInput.value,
+            bodyText: bodyText,
+            readMoreUrl: pressUrlInput.value,
+            mainImageUrl: pressMainImageUrl,
+            previewImageUrl: pressPreviewImageUrl,
+            showId: pressShowSelect.value || null,
+            categoryId: pressCategorySelect.value || null
+          })
+        });
+        
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(JSON.stringify(data));
+        }
+        
+        // Ensure preview link is set to the newly created press item preview
+        pressPreviewLink.href = data.previewUrl;
+        pressItemId = data.itemId;
+        pressSlug = slug;
+        pressResult.classList.remove('hidden');
+        if (data.log) { pressLog(data.log); }
+      } catch (err) {
+        alert(err);
+        pressLog(err);
+      } finally {
+        pressProgress.classList.add('hidden');
+        createPressBtn.disabled = false;
+      }
+    });
+
+    publishPressBtn.addEventListener('click', async () => {
+      if (!pressItemId) return;
+      publishPressBtn.disabled = true;
+      pressPublishStatus.textContent = 'Publishing...';
+      try {
+        const res = await fetch('/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemId: pressItemId, slug: pressSlug, collectionId: "{{ PRESS_COLLECTION_ID }}" })
+        });
+        if (!res.ok){
+          const errText = await res.text();
+          pressLog(errText);
+          throw new Error(errText);
+        }
+        const data = await res.json();
+        if (data.log) { pressLog(data.log); }
+        pressPublishStatus.innerHTML = `✅ Published! <a href="${data.liveUrl}" target="_blank">View live page ↗</a>`;
+      } catch (err) {
+        pressPublishStatus.textContent = '❌ Error';
+        pressLog(err);
+      } finally {
+        publishPressBtn.disabled = false;
+      }
+    });
   </script>
 </body>
 </html> 
